@@ -1,76 +1,147 @@
-# Car Number Plate Extraction System
+# ANPR: Automatic Number Plate Recognition Pipeline
 
-This project implements a Car Number Plate Extraction pipeline in three main steps: Detection, Alignment, and Optical Character Recognition (OCR). It was developed based on the guiding principles from "Car Number Plate Extraction in Three Steps".
+Real-time license plate detection and recognition system built with OpenCV and Tesseract OCR.
 
-## Project Structure
+---
+
+## System Workflow
+
 ```
-.
-├── data/
-│   ├── logs/             # Contains the CSV output logs of detected plates
-│   └── plates/           # Contains plate images
-├── src/
-│   ├── camera.py         # Validates camera functionality
-│   ├── detect.py         # Plate candidate detection using contours
-│   ├── align.py          # Plate rectification and normalization via perspective warp
-│   ├── ocr.py            # Optical character recognition using Tesseract
-│   ├── validate.py       # Regex validation against formatting norms
-│   └── temporal.py       # Full live pipeline combining all stages and logging to CSV
-├── README.md             # This documentation
+Frame Input → Contour Detection → Perspective Warp → OCR → Regex Check → Temporal Filter → CSV Output
 ```
 
-## Features
-- **Plate Detection**: Uses contour geometry (size and aspect ratio constraints) for lightweight CPU-oriented detection.
-- **Plate Alignment**: Employs perspective transformation to warp the detected bounding box into a strictly uniform 450x140 resolution image.
-- **OCR via Tesseract**: Processes the isolated and aligned plate image to extract alphanumeric text.
-- **Regex Validation**: Validates the extracted candidates matching the layout `[A-Z]{3}[0-9]{3}[A-Z]`.
-- **Temporal Consistency**: Takes sequential readings across video frames and verifies the majority vote to avoid single-frame hallucination.
-- **CSV Logging**: Validated strings are logged with a timestamp and cooldown restrictions to avoid duplication.
+## Required Pipeline (Per Assignment)
 
-## Setup Requirements
+| Step | File | Core Function |
+|------|------|---------------|
+| **1. Detection** | `detect.py` | Edge detection → Contour extraction → Geometry filtering |
+| **2. Alignment** | `align.py` | Corner detection → Perspective transform → 450×140 normalization |
+| **3. OCR** | `ocr.py` | Grayscale → Gaussian blur → Otsu threshold → Tesseract PSM-8 |
+| **4. Validation** | `validate.py` | Pattern match `[A-Z]{3}[0-9]{3}[A-Z]` → Candidate scoring |
+| **5. Temporal** | `temporal.py` | 5-frame buffer → Majority vote → Consistency check |
+| **6. Save** | `temporal.py` | Deduplication (10s cooldown) → CSV append |
 
-It's heavily recommended to use a Python virtual environment to avoid versioning conflicts. Ensure that `tesseract-ocr` is installed on your operating system.
+---
+
+## Quick Start
 
 ```bash
-# Set up a virtual environment
-python3 -m venv venv
-source venv/bin/activate
+# 1. Install system dependency (Tesseract)
+# Windows: https://github.com/UB-Mannheim/tesseract/wiki
+# Linux: sudo apt install tesseract-ocr
+# macOS: brew install tesseract
 
-# Install the Python dependencies
-python -m pip install --upgrade pip
-pip install opencv-python numpy pytesseract pandas
+# 2. Setup Python environment
+python -m venv venv
+venv\Scripts\activate  # Windows
+pip install -r requirements.txt
+
+# 3. Execute pipeline stages
+cd src
+python camera.py      # Verify hardware
+python detect.py      # Test detection
+python align.py       # Test alignment
+python ocr.py         # Test recognition
+python validate.py    # Test validation
+python temporal.py    # Full system with logging
 ```
 
-### OS Dependencies
-- Ubuntu/Debian: `sudo apt install tesseract-ocr`
-- macOS: `brew install tesseract`
+---
 
-## Usage Guide
-Navigate to the `src` directory or run the modules directly. They logically progress sequentially:
+## Technical Implementation
 
-1. **Test Camera**
-   ```bash
-   python src/camera.py
-   ```
-2. **Detect Plates**
-   ```bash
-   python src/detect.py
-   ```
-3. **Align Plates**
-   ```bash
-   python src/align.py
-   ```
-4. **Extract Text (OCR)**
-   ```bash
-   python src/ocr.py
-   ```
-5. **Validate OCR Strings**
-   ```bash
-   python src/validate.py
-   ```
-6. **Full Sequence** (The final working system logging to CSV)
-   ```bash
-   python src/temporal.py
-   ```
+### Detection Strategy
+```python
+Preprocessing:  BGR → Gray → Gaussian(5,5) → Canny(100,200)
+Filtering:      Area > 600px, Aspect ratio 2.0-8.0
+Output:         List of minAreaRect candidates
+```
 
-Press `q` to exit the graphical windows.
-"# anpr-system" 
+### Alignment Math
+```python
+Input:          Rotated bounding box (4 corner points)
+Operation:      getPerspectiveTransform() → warpPerspective()
+Output:         450×140 normalized plate image
+```
+
+### OCR Configuration
+```
+Engine:         Tesseract LSTM
+Page Seg:       PSM 8 (single word)
+Whitelist:      A-Z, 0-9
+Preprocessing:  Otsu thresholding
+```
+
+### Validation Logic
+```python
+Pattern:        [A-Z]{3}[0-9]{3}[A-Z]
+Example:        AAA000A
+Scoring:        (is_valid, alnum_count)
+Throttle:       350ms between OCR runs
+```
+
+### Temporal Smoothing
+```python
+Buffer:         5 frames
+Consensus:      Counter.most_common(1)
+Cooldown:       10 seconds per unique plate
+Storage:        data/plates.csv
+```
+
+---
+
+## Directory Layout
+
+```
+.
+├── README.md              # Documentation
+├── requirements.txt       # Dependencies
+├── data/
+│   ├── plates.csv         # Detected plates log
+│   └── logs/              # Additional logs
+├── screenshots/           # Test evidence
+│   ├── detection.png
+│   ├── alignment.png
+│   └── ocr.png
+└── src/
+    ├── camera.py          # Hardware check
+    ├── detect.py          # Stage 1
+    ├── align.py           # Stage 2
+    ├── ocr.py             # Stage 3
+    ├── validate.py        # Stage 4
+    ├── temporal.py        # Stages 5-6
+    └── utils.py           # Shared components
+```
+
+---
+
+## Module Extras
+
+### validate.py CLI Options
+```bash
+# Single image test
+python validate.py --image ../screenshots/test.jpg
+
+# With ROI selection
+python validate.py --image ../screenshots/test.jpg --roi
+```
+
+---
+
+## CSV Schema
+
+**File**: `data/plates.csv`
+
+| Field | Format | Example |
+|-------|--------|---------|
+| plate_number | [A-Z]{3}[0-9]{3}[A-Z] | ABC123D |
+| timestamp | YYYY-MM-DD HH:MM:SS | 2025-03-20 14:30:00 |
+
+---
+
+## Notes
+
+- Modular architecture: Common functions extracted to `utils.py`
+- All stages independently testable
+- Runs on CPU (no GPU required)
+- Real-time processing at ~15-30 FPS (camera dependent)
